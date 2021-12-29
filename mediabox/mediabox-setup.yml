@@ -1,0 +1,165 @@
+---
+- name: Setup mediabox (Ubuntu Focal 20.04 on arm64)
+  hosts: mediaboxsvrs
+  tasks:
+    ##
+    ## Update
+    ##
+    - name: Update, upgrade, autoremove & autoclean apt packages
+      become: true
+      apt:
+        update_cache: yes
+        cache_valid_time: 86400 #One day
+        upgrade: yes
+        autoremove: yes
+        autoclean: yes
+
+    ##
+    ## Reboot
+    ##
+    - name: Check if reboot required
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_required_file
+
+    - name: Reboot the system if required
+      become: true
+      reboot:
+      when: reboot_required_file.stat.exists == true
+
+    ## Timezone setup
+    - name: Set timezone to Asia/Tokyo
+      become: true
+      timezone:
+        name: Asia/Kolkata
+
+    ## Hostname setup
+    - name: Set a hostname
+      become: true
+      hostname:
+        name: mediabox
+
+    ##
+    ## qBittorrent installation setup
+    ##
+    - name: Add qbittorrent stable repository into sources list
+      become: true
+      apt_repository:
+        repo: ppa:qbittorrent-team/qbittorrent-stable
+        state: present
+
+    - name: Install qbittorrent-nox (no x window system/headless with webui)
+      become: true
+      apt:
+        name: qbittorrent-nox
+        state: present
+        update_cache: yes
+
+    ##
+    ## Jellyfin installation setup
+    ##
+    - name: Install apt-transport-https dependency for Jellyfin
+      become: true
+      apt:
+        name: apt-transport-https
+        state: present
+
+    - name: Add an apt signing key for jellyfin repo
+      become: true
+      apt_key:
+        url: https://repo.jellyfin.org/debian/jellyfin_team.gpg.key
+        state: present
+
+    - name: Add jellyfin stable repository into sources list
+      become: true
+      apt_repository:
+        update_cache: yes
+        repo: 'deb [arch=arm64] https://repo.jellyfin.org/ubuntu focal main'
+        state: present
+        filename: jellyfin
+
+    - name: Install Jellyfin (jellyfin-server, jellyfin-web, jellyfin-ffmpeg)
+      become: true
+      apt:
+        update_cache: yes
+        name:
+            - jellyfin-server
+            - jellyfin-web
+            - jellyfin-ffmpeg
+        state: present
+
+    ##
+    ## qbittorrent-nox service setup
+    ##
+    - name: Copy qbittorrent-nox systemd service file
+      become: true
+      copy:
+        src: myfiles/qbittorrent-nox.service
+        dest: /etc/systemd/system/qbittorrent-nox.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Systemd daemon-reload | Enable & Start the qbittorrent-nox service
+      become: true
+      systemd:
+        daemon_reload: yes
+        name: qbittorrent-nox
+        enabled: yes
+        masked: no
+        state: started
+
+    - name: create the media directory structure if they don't exist
+      become: true
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: jellyfin
+        group: jellyfin
+        mode: 0775
+      loop:
+        - /media/incomplete
+        - /media/anime
+        - /media/movies
+        - /media/shows
+        - /media/other
+
+    ##
+    ## Firewall enable with rules
+    ##
+    - name: Enable ufw and allow 22,8080,8096 ports
+      become: true
+      ufw:
+        state: enabled
+        rule: allow
+        port: "{{ item }}"
+        proto: any
+      loop:
+        - 22
+        - 8080
+        - 8096
+
+    ##
+    ## Zerotier installation setup
+    ##
+    - name: Add an apt signing key for zerotier repo
+      become: true
+      apt_key:
+        url: https://raw.githubusercontent.com/zerotier/ZeroTierOne/master/doc/contact%40zerotier.com.gpg
+        state: present
+
+    - name: Add zerotier stable repository into sources list
+      become: true
+      apt_repository:
+        update_cache: yes
+        repo: 'deb http://download.zerotier.com/debian/bionic bionic main'
+        state: present
+        filename: zerotier-one
+
+    - name: Install zerotier-one
+      become: true
+      apt:
+        update_cache: yes
+        name: zerotier-one
+        state: present
+
